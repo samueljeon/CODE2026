@@ -97,8 +97,6 @@ int mapFloatSignal(float input, int minVal, int maxVal, InputSignalRange rangeTy
   }
 }
 
-
-
 void driveMotor(byte in1, byte in2, byte en, float value) {
   if (value > 0.01f) {
     digitalWrite(in1, HIGH);
@@ -115,10 +113,51 @@ void driveMotor(byte in1, byte in2, byte en, float value) {
   }
 }
 
-//Linear doorlock stepdown mech setup
-unsigned long motorStartTime = 0;
-bool motorRunning = false;
+//actuator step-down init
+unsigned long actuatorStartTime = 0;
+bool actuatorWasOn = false;
+void driveLinearActuator(byte in1, byte in2, byte en, float value)
+{
+  bool motorOn = (value != 0);
 
+  // detect OFF → ON transition
+  if (motorOn && !actuatorWasOn)
+  {
+    actuatorStartTime = millis();
+  }
+
+  if (motorOn)
+  {
+    int pwm;
+
+    if (millis() - actuatorStartTime < 1000)
+      pwm = MOTOR_START_SPEED;   // 50%
+    else
+      pwm = MOTOR_HOLD_SPEED;    // 20%
+
+    if (value > 0)
+    {
+      digitalWrite(in1, HIGH);
+      digitalWrite(in2, LOW);
+    }
+    else
+    {
+      digitalWrite(in1, LOW);
+      digitalWrite(in2, HIGH);
+    }
+
+    analogWrite(en, pwm);
+  }
+  else
+  {
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, LOW);
+    analogWrite(en, 0);
+  }
+
+  actuatorWasOn = motorOn;
+}
+//------------------------------------------------------------
 void applyControls(const ROVPacket& p) {
   servo_lf.writeMicroseconds(mapFloatSignal(p.tleft,   thrusterMin, thrusterMax, RANGE_NEG_ONE_TO_ONE));
   servo_rt.writeMicroseconds(mapFloatSignal(-p.tright, thrusterMin, thrusterMax, RANGE_NEG_ONE_TO_ONE));
@@ -128,48 +167,8 @@ void applyControls(const ROVPacket& p) {
 
   servo_rotate.writeMicroseconds(mapFloatSignal(p.rotate, rotateMin, rotateMax, RANGE_ZERO_TO_ONE));
 
-  float v = p.dc_motor;
-
-if (v != 0))
-{
-    // If motor just started, record time
-    if (!motorRunning)
-    {
-        motorRunning = true;
-        motorStartTime = millis();
-    }
-
-    // Decide speed based on how long it's been running
-    int pwm;
-    if (millis() - motorStartTime < 1000)//ms
-        pwm = MOTOR_START_SPEED;
-    else
-        pwm = MOTOR_HOLD_SPEED;
-
-    // Set direction
-    if (v > 0)
-    {
-        digitalWrite(M1_IN1, HIGH);
-        digitalWrite(M1_IN2, LOW);
-    }
-    else
-    {
-        digitalWrite(M1_IN1, LOW);
-        digitalWrite(M1_IN2, HIGH);
-    }
-
-    // Apply power
-    analogWrite(M1_EN, pwm);
-}
-else
-{
-    // Motor is off → reset everything
-    motorRunning = false;
-    analogWrite(M1_EN, 0);
-    digitalWrite(M1_IN1, LOW);
-    digitalWrite(M1_IN2, LOW);
-}
-
+  //motor 1 (linear actuator)
+  driveLinearActuator(M1_IN1, M1_IN2, M1_EN, p.dc_motor);
   //motor 2
   driveMotor(M2_IN1, M2_IN2, M2_EN, p.dc_motor2);
 }
