@@ -11,12 +11,9 @@ DHT dht(DHTPIN, DHTTYPE);
 Adafruit_MPU6050 mpu;
 
 //configs-change if needed
-int elbow_default_pos = 1800 
+int elbow_default_pos = 1800; 
 //1500 us is default servo pos; however, due to the installation the default pos makes the elbow boot to a depressed angle, damaging servo. 
 //1800 ms makes elbow actually level on boot
-// Linear actuator speeds 
-const byte MOTOR_START_SPEED = 128; // 50% power
-const byte MOTOR_HOLD_SPEED  = 51;  // 20% power
 
 const int thrusterMin = 1100;
 const int thrusterMax = 1900;
@@ -98,65 +95,28 @@ int mapFloatSignal(float input, int minVal, int maxVal, InputSignalRange rangeTy
 }
 
 void driveMotor(byte in1, byte in2, byte en, float value) {
-  if (value > 0.01f) {
+  value = constrain(value, -1.0f, 1.0f);
+
+  int pwm = abs(value) * 255;
+
+  if (value > 0.1f) {
     digitalWrite(in1, HIGH);
     digitalWrite(in2, LOW);
-    analogWrite(en, MOTOR_SPEED);
-  } else if (value < -0.1f) {
+    analogWrite(en, pwm);
+  } 
+  else if (value < -0.1f) {
     digitalWrite(in1, LOW);
     digitalWrite(in2, HIGH);
-    analogWrite(en, MOTOR_SPEED);
-  } else {
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, LOW);
-    analogWrite(en, 0);
-  }
-}
-
-//actuator step-down init
-unsigned long actuatorStartTime = 0;
-bool actuatorWasOn = false;
-void driveLinearActuator(byte in1, byte in2, byte en, float value)
-{
-  bool motorOn = (value != 0);
-
-  // detect OFF → ON transition
-  if (motorOn && !actuatorWasOn)
-  {
-    actuatorStartTime = millis();
-  }
-
-  if (motorOn)
-  {
-    int pwm;
-
-    if (millis() - actuatorStartTime < 1000)
-      pwm = MOTOR_START_SPEED;   // 50%
-    else
-      pwm = MOTOR_HOLD_SPEED;    // 20%
-
-    if (value > 0)
-    {
-      digitalWrite(in1, HIGH);
-      digitalWrite(in2, LOW);
-    }
-    else
-    {
-      digitalWrite(in1, LOW);
-      digitalWrite(in2, HIGH);
-    }
-
     analogWrite(en, pwm);
-  }
-  else
-  {
+  } 
+  else {
     digitalWrite(in1, LOW);
     digitalWrite(in2, LOW);
     analogWrite(en, 0);
   }
-
-  actuatorWasOn = motorOn;
 }
+
+
 //------------------------------------------------------------
 void applyControls(const ROVPacket& p) {
   servo_lf.writeMicroseconds(mapFloatSignal(p.tleft,   thrusterMin, thrusterMax, RANGE_NEG_ONE_TO_ONE));
@@ -167,8 +127,8 @@ void applyControls(const ROVPacket& p) {
 
   servo_rotate.writeMicroseconds(mapFloatSignal(p.rotate, rotateMin, rotateMax, RANGE_ZERO_TO_ONE));
 
-  //motor 1 (linear actuator)
-  driveLinearActuator(M1_IN1, M1_IN2, M1_EN, p.dc_motor);
+  //motor 1 (linear actuator)(blue tape/white/green cable)
+  driveMotor(M1_IN1, M1_IN2, M1_EN, p.dc_motor);
   //motor 2
   driveMotor(M2_IN1, M2_IN2, M2_EN, p.dc_motor2);
 }

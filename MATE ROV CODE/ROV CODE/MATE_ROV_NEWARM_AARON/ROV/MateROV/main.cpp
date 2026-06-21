@@ -22,7 +22,7 @@ struct ROVPacket {
     float tright = 0;
     float tup_left = 0;
     float tup_right = 0;
-    float rotate = 0.5;        // Elbow servo:    L2/R2 triggers
+    float rotate = 0.65;        // Elbow servo:    L2/R2 triggers
     float dc_motor = 0.0;      // DC motor 1:     Dpad Left/Right
     float dc_motor2 = 0.0;     // DC motor 2:     Dpad Up/Down
     uint8_t end = 0x55;
@@ -166,6 +166,33 @@ static float ApplyExpo(float input, float expo = 0.7f)
          + (1.0f - expo) * input;
 }
 
+
+
+float ApplyStepDown(float input) {
+    static bool wasMoving = false;
+    static auto startTime = std::chrono::steady_clock::now();
+
+    bool moving = std::abs(input) > 0.1f;
+
+    if (moving && !wasMoving) {
+        startTime = std::chrono::steady_clock::now();
+    }
+
+    wasMoving = moving;
+
+    if (!moving) {
+        return 0.0f;
+    }
+
+    auto elapsed = std::chrono::steady_clock::now() - startTime;
+
+    if (elapsed < std::chrono::seconds(1)) {
+        return input*0.6f;        // first 1 second: full requested power
+    } else {
+        return input * 0.3f;  // after 1 second: 50% hold power
+    }
+}
+
 int main() {
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -285,8 +312,8 @@ int main() {
             ImGui::Text("(L Stick)      Right Thruster:  %+.2f", pkt.tright);
             ImGui::Text("(R Stick)      Up Thrusters:    %+.2f", pkt.tup_left);
             ImGui::Text("(L2/R2)        Elbow Servo:     %+.2f", pkt.rotate);
-            ImGui::Text("(X/B)          Rotation(DC1):   %+.2f", pkt.dc_motor);
-            ImGui::Text("(Y/A)          Linear(DC2):     %+.2f", pkt.dc_motor2);
+            ImGui::Text("(Y/A)          Linear(DC1):     %+.2f", pkt.dc_motor);
+            ImGui::Text("(X/B)          Rotation(DC2):   %+.2f", pkt.dc_motor2);
             ImGui::End();
         }
 
@@ -323,18 +350,18 @@ int main() {
         }
 
 
-        // --- DC Motor 1 (rotation): X and B, direct ---
+        // --- DC Motor 1 (linear): Y and A, stepdown ---
         float dcMotor = 0.0f;
         for (auto& c : controllers) {
             if (c->Triangle()) dcMotor =  1.0f;
             if (c->Cross())  dcMotor = -1.0f;
         }
 
-        // --- DC Motor 2 (linear movement): Y and A, direct ---
+        // --- DC Motor 2 (rotation): X and B, direct ---
         float dcMotor2 = 0.0f;
         for (auto& c : controllers) {
-            if (c->Circle())   dcMotor2 =  1.0f;
-            if (c->Square()) dcMotor2 = -1.0f;
+            if (c->Square())   dcMotor2 =  1.0f;
+            if (c->Circle()) dcMotor2 = -1.0f;
         }
 
         pkt.tleft     = -calib.apply("TLeft",      tleft);
@@ -342,8 +369,8 @@ int main() {
         pkt.tup_left  =  calib.apply("TUp Left",   z);
         pkt.tup_right =  calib.apply("TUp Right",  z);
         pkt.rotate    =  calib.apply("Rotate",     pkt.rotate + rotateDelta);
-        pkt.dc_motor  =  calib.apply("DC Motor",   dcMotor);
-        pkt.dc_motor2 =  calib.apply("DC Motor 2", dcMotor2);
+        pkt.dc_motor  = calib.apply("DC Motor",   ApplyStepDown(dcMotor));          // rotation motor at 50%
+        pkt.dc_motor2 = calib.apply("DC Motor 2", dcMotor2*0.5f); // linear actuator step-down
 
         if (std::memcmp(&pkt, &lastSentPacket, sizeof(ROVPacket)) != 0) {
             try {
