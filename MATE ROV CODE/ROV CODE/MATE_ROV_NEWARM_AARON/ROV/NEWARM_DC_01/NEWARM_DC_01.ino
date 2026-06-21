@@ -10,6 +10,14 @@
 DHT dht(DHTPIN, DHTTYPE);
 Adafruit_MPU6050 mpu;
 
+//configs-change if needed
+int elbow_default_pos = 1800 
+//1500 us is default servo pos; however, due to the installation the default pos makes the elbow boot to a depressed angle, damaging servo. 
+//1800 ms makes elbow actually level on boot
+// Linear actuator speeds 
+const byte MOTOR_START_SPEED = 128; // 50% power
+const byte MOTOR_HOLD_SPEED  = 51;  // 20% power
+
 const int thrusterMin = 1100;
 const int thrusterMax = 1900;
 const int rotateMin   = 500;
@@ -76,7 +84,6 @@ const byte M2_IN1 = 6;
 const byte M2_IN2 = 7;
 const byte M2_EN  = 10;
 
-const byte MOTOR_SPEED = 128;
 
 int mapFloatSignal(float input, int minVal, int maxVal, InputSignalRange rangeType) {
   input = constrain(input, (rangeType == RANGE_NEG_ONE_TO_ONE ? -1.0f : 0.0f), 1.0f);
@@ -89,6 +96,8 @@ int mapFloatSignal(float input, int minVal, int maxVal, InputSignalRange rangeTy
     return static_cast<int>(input * (maxVal - minVal) + minVal);
   }
 }
+
+
 
 void driveMotor(byte in1, byte in2, byte en, float value) {
   if (value > 0.01f) {
@@ -106,6 +115,10 @@ void driveMotor(byte in1, byte in2, byte en, float value) {
   }
 }
 
+//Linear doorlock stepdown mech setup
+unsigned long motorStartTime = 0;
+bool motorRunning = false;
+
 void applyControls(const ROVPacket& p) {
   servo_lf.writeMicroseconds(mapFloatSignal(p.tleft,   thrusterMin, thrusterMax, RANGE_NEG_ONE_TO_ONE));
   servo_rt.writeMicroseconds(mapFloatSignal(-p.tright, thrusterMin, thrusterMax, RANGE_NEG_ONE_TO_ONE));
@@ -115,7 +128,49 @@ void applyControls(const ROVPacket& p) {
 
   servo_rotate.writeMicroseconds(mapFloatSignal(p.rotate, rotateMin, rotateMax, RANGE_ZERO_TO_ONE));
 
-  driveMotor(M1_IN1, M1_IN2, M1_EN, p.dc_motor);
+  float v = p.dc_motor;
+
+if (v != 0))
+{
+    // If motor just started, record time
+    if (!motorRunning)
+    {
+        motorRunning = true;
+        motorStartTime = millis();
+    }
+
+    // Decide speed based on how long it's been running
+    int pwm;
+    if (millis() - motorStartTime < 1000)//ms
+        pwm = MOTOR_START_SPEED;
+    else
+        pwm = MOTOR_HOLD_SPEED;
+
+    // Set direction
+    if (v > 0)
+    {
+        digitalWrite(M1_IN1, HIGH);
+        digitalWrite(M1_IN2, LOW);
+    }
+    else
+    {
+        digitalWrite(M1_IN1, LOW);
+        digitalWrite(M1_IN2, HIGH);
+    }
+
+    // Apply power
+    analogWrite(M1_EN, pwm);
+}
+else
+{
+    // Motor is off → reset everything
+    motorRunning = false;
+    analogWrite(M1_EN, 0);
+    digitalWrite(M1_IN1, LOW);
+    digitalWrite(M1_IN2, LOW);
+}
+
+  //motor 2
   driveMotor(M2_IN1, M2_IN2, M2_EN, p.dc_motor2);
 }
 
@@ -194,7 +249,7 @@ void setup() {
   servo_rt.writeMicroseconds((thrusterMin + thrusterMax) / 2);
   servo_up1.writeMicroseconds((thrusterMin + thrusterMax) / 2);
   servo_up2.writeMicroseconds((thrusterMin + thrusterMax) / 2);
-  servo_rotate.writeMicroseconds(1800); //1500 ms is default servo pos; however, due to the installation the default pos makes the elbow boot to a depressed angle, damaging servo. 1800 ms makes elbow actually level on boot
+  servo_rotate.writeMicroseconds(elbow_default_pos); 
 
   pinMode(M1_IN1, OUTPUT);
   pinMode(M1_IN2, OUTPUT);
