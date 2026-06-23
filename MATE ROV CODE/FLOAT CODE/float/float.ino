@@ -12,12 +12,12 @@
 
 #define LED_PIN 11
 
-const int pressureInput = A3; // analog pinzz
+const int pressureInput = A3;  // analog pinzz
 float pressureZero = 90.5;
 float pressureMax = 920.7;
 const int pressuretransducermaxPSI = 30;
 const int baudRate = 9600;
-const int sensorreadDelay = 250; // not being used?
+const int sensorreadDelay = 250;  // not being used?
 const int pump = 5;
 const int valve = 6;
 int f_size = 4;  // float has four bytes
@@ -27,17 +27,17 @@ int year_size = 2;
 bool start = false;
 bool descend = false;
 bool ascend = false;
-bool written = false; // not being used?
+bool written = false;  // not being used?
 bool bottom = false;
 bool transmit = false;
 bool surface = false;
 
 AltSoftSerial softSerial;  // for sending logs to console/serial
-MS8607 barometricSensor; // for getting pressure, humidity, and temperature
-RTC_DS3231 rtc;  // for getting time
+MS8607 barometricSensor;   // for getting pressure, humidity, and temperature
+RTC_DS3231 rtc;            // for getting time
 uEEPROMLib eeprom(0x57);
 
-float init_pressure; // not being used?
+float init_pressure;  // not being used?
 int datapoints_counter = 0;
 unsigned int addr_EEPROM;
 uint8_t month, day, hour, minute, second;
@@ -71,6 +71,7 @@ void loop() {
     }
   } else {
     softSerial.println("Start failed..");
+       Serial.println("Start failed..");
   }
 }
 
@@ -82,16 +83,18 @@ void initializeComponents() {
   strip.begin();
   strip.show();
 
-  #if defined(__AVR_ATtiny85__)
-    if (F_CPU == 16000000)
-      clock_prescale_set(clock_div_1);
-  #endif
+#if defined(__AVR_ATtiny85__)
+  if (F_CPU == 16000000)
+    clock_prescale_set(clock_div_1);
+#endif
 
   // set the clock the same of the laptop
   rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   // error handling for Barometric meter
   if (!barometricSensor.begin()) {
     softSerial.println("MS8607 sensor did not respond. Please check wiring.");
+    Serial.println("MS8607 sensor did not respond. Please check wiring.");
+
     while (1)
       ;
   }
@@ -99,6 +102,8 @@ void initializeComponents() {
   int err = barometricSensor.set_humidity_resolution(MS8607_humidity_resolution_12b);
   if (err != MS8607_status_ok) {
     softSerial.print("Problem setting the MS8607 sensor humidity resolution. Error code = ");
+    Serial.print("Problem setting the MS8607 sensor humidity resolution. Error code = ");
+
     softSerial.println(err);
     while (1)
       ;
@@ -107,6 +112,7 @@ void initializeComponents() {
   err = barometricSensor.disable_heater();
   if (err != MS8607_status_ok) {
     softSerial.print("Problem disabling the MS8607 humidity sensor heater. Error code = ");
+    Serial.print("Problem disabling the MS8607 humidity sensor heater. Error code = ");
     softSerial.println(err);
     while (1)
       ;
@@ -121,6 +127,8 @@ void initializeComponents() {
   digitalWrite(pump, HIGH);
   digitalWrite(valve, HIGH);
   softSerial.println("Please wait 10s while the bladder is being filled.");
+  Serial.println("Please wait 10s while the bladder is being filled.");
+
 
   delay(9000);
   digitalWrite(pump, LOW);
@@ -306,7 +314,7 @@ void handleAscent() {
   readDataFromEEPROM();
   transmit = true;
 
-  if (transmit) { // seems useless
+  if (transmit) {  // seems useless
     softSerial.println("Clearing the entire EEPROM. This will take a few moments");
     for (addr_EEPROM = 0; addr_EEPROM < 1024; addr_EEPROM++) {
       eeprom.eeprom_write(addr_EEPROM, 0);

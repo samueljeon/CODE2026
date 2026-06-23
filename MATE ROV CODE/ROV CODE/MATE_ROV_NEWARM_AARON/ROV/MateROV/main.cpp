@@ -49,7 +49,7 @@ struct TelemetryPacket {
 
 asio::serial_port *serial = nullptr;
 
-std::string serialPortPath = "/dev/tty.usbmodem144201";
+std::string serialPortPath = "/dev/tty.usbmodem141201";
 const int baudRate = 115200;
 
 TelemetryPacket incoming;

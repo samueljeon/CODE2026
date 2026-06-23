@@ -22,16 +22,17 @@ struct ROVPacket {
     float tright = 0;
     float tup_left = 0;
     float tup_right = 0;
-    float rotate = 0.5;        // Elbow servo:    L2/R2 triggers
-    float dc_motor = 0.0;      // DC motor 1:     Dpad Left/Right
-    float dc_motor2 = 0.0;     // DC motor 2:     Dpad Up/Down
+    float claw = 0.5;
+    float rotate = 0.5;
     uint8_t end = 0x55;
 };
 #pragma pack(pop)
 
 #pragma pack(push, 1)
 struct TelemetryPacket {
-    uint8_t start = 0xAB;
+    uint8_t start = 0xAB;     // different start byte to distinguish
+    // float depth;
+    // float pressure;
     float temperature;
     float humidity;
     uint8_t end = 0x54;
@@ -41,8 +42,13 @@ struct TelemetryPacket {
 
 asio::serial_port *serial = nullptr;
 
-std::string serialPortPath = "/dev/tty.usbmodem141201";
+// ls /dev/tty.*
+
+// std::string serialPortPath = "/dev/ttys007";
+std::string serialPortPath = "/dev/tty.usbmodem1201";
 const int baudRate = 115200;
+
+
 
 TelemetryPacket incoming;
 
@@ -58,6 +64,8 @@ void handleTelemetryRead(const boost::system::error_code& ec, std::size_t bytes_
                       << " % | Temp: " << pkt->temperature << " °C\n";
         }
     }
+
+    // Always reissue the async read
     asyncReadTelemetry(serial, io_context);
 }
 
@@ -75,6 +83,8 @@ void asyncReadTelemetry(asio::serial_port& serial, asio::io_context& io_context)
                               << " % | Temp: " << pkt->temperature << " °C\n";
                 }
             }
+
+            // Recursively continue reading
             asyncReadTelemetry(serial, io_context);
         }
     );
@@ -120,6 +130,8 @@ void RenderDockSpace(float fps) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
+
+
     ImGui::Begin("DockSpace", nullptr, windowFlags);
     ImGui::PopStyleVar(3);
 
@@ -130,6 +142,7 @@ void RenderDockSpace(float fps) {
         ImGui::Text("FPS: %.1f", fps);
         ImGui::Separator();
         ImGui::Text("Packets Sent: %d", packetsSent);
+
         ImGui::EndMenuBar();
     }
 
@@ -138,9 +151,12 @@ void RenderDockSpace(float fps) {
 
 
 int main() {
+    // std::vector<Controller> controllers;
+
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER);
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2"); // 0=nearest, 1=linear, 2=best (if supported)
+
 
     SDL_Window* window = SDL_CreateWindow("MateROV", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1200, 800, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
@@ -167,14 +183,21 @@ int main() {
 
     std::vector<std::unique_ptr<Controller>> controllers;
 
+    // for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+    //     auto c = std::make_unique<Controller>();
+    //     if (c->Init(i, true, true)) {
+    //         std::cout << "[Controller] opened index " << i << '\n';
+    //         controllers.push_back(std::move(c));    // moves a *unique_ptr*, not the object
+    //     }
+    // }
+
     CalibManager calib;
-    calib.registerControl("TLeft",      -1.0f, 1.0f, true);
-    calib.registerControl("TRight",     -1.0f, 1.0f, true);
-    calib.registerControl("TUp Left",   -1.0f, 1.0f, true);
-    calib.registerControl("TUp Right",  -1.0f, 1.0f, true);
-    calib.registerControl("Rotate",      0.0f, 1.0f);        // Elbow servo
-    calib.registerControl("DC Motor",   -1.0f, 1.0f, true);  // X and B
-    calib.registerControl("DC Motor 2", -1.0f, 1.0f, true);  // y and A
+    calib.registerControl("TLeft", -1.0f, 1.0f, true);
+    calib.registerControl("TRight", -1.0f, 1.0f, true);
+    calib.registerControl("TUp Left", -1.0f, 1.0f, true);
+    calib.registerControl("TUp Right", -1.0f, 1.0f, true);
+    calib.registerControl("Claw", 0.0f, 1.0f);
+    calib.registerControl("Rotate", 0.0f, 1.0f);
     calib.refreshProfiles();
     calib.loadLastUsedProfile();
 
@@ -185,12 +208,26 @@ int main() {
         asyncReadTelemetry(*serial, io_context);
     }
 
+
     bool quit = false;
     SDL_Event e;
 
     ROVPacket pkt;
     ROVPacket lastSentPacket{};
     auto lastReconnectAttempt = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+
+    int rotateHeldFrames = 0;
+    bool rotateLastFrameUp = false;
+    bool rotateLastFrameDown = false;
+
+    // CameraManager camera1(renderer);
+    // camera1.populateCameraList();
+    // camera1.requestCamera(0, 0); // auto-connect first camera to slot 0
+    // camera1.requestCamera(1, 1); // auto-connect second camera to slot 1
+    //
+    //
+    // int selectedCamIndex = -1;
+    // bool cameraOpened = false;
 
     ObsSceneSwitcher obs;
     obs.connect();
@@ -201,7 +238,7 @@ int main() {
 
             if (e.type == SDL_CONTROLLERDEVICEADDED) {
                 int idx = e.cdevice.which;
-                auto c = std::make_unique<Controller>();
+                auto c  = std::make_unique<Controller>();
                 if (c->Init(idx, true, true)) {
                     std::cout << "[HotPlug] added idx " << idx << '\n';
                     controllers.push_back(std::move(c));
@@ -209,7 +246,7 @@ int main() {
             }
 
             if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
-                int goneID = e.cdevice.which;
+                int goneID = e.cdevice.which;   // instance id
                 std::erase_if(controllers, [goneID](auto& p){
                     return p && p->InstanceID() == goneID;
                 });
@@ -227,13 +264,15 @@ int main() {
         }
 
         for (auto it = controllers.begin(); it != controllers.end(); ) {
-            if (!(*it)->IsAttached()) {
+            if (!(*it)->IsAttached()) {           // stale pointer → erase & close
                 std::cout << "[GC] removed detached pad\n";
-                it = controllers.erase(it);
+                it = controllers.erase(it);       // unique_ptr destructor closes it
             } else {
                 ++it;
             }
         }
+
+        // io_context.poll();
 
         while (io_context.poll_one()) {}
 
@@ -252,14 +291,21 @@ int main() {
 
         {
             ImGui::Begin("ROV Packet Stats");
-            ImGui::Text("(L Stick)      Left Thruster:   %+.2f", pkt.tleft);
-            ImGui::Text("(L Stick)      Right Thruster:  %+.2f", pkt.tright);
-            ImGui::Text("(R Stick)      Up Thrusters:    %+.2f", pkt.tup_left);
-            ImGui::Text("(L2/R2)        Elbow Servo:     %+.2f", pkt.rotate);
-            ImGui::Text("(Dpad L/R)     DC Motor 1:      %+.2f", pkt.dc_motor);
-            ImGui::Text("(Dpad Up/Down) DC Motor 2:      %+.2f", pkt.dc_motor2);
+            ImGui::Text("(L Trig) Left Thruster:     %+.2f", pkt.tleft);
+            ImGui::Text("(L Trig) Right Thruster:    %+.2f", pkt.tright);
+            ImGui::Text("(R Trig) Up Thruster Left:  %+.2f", pkt.tup_left);
+            ImGui::Text("(R Trig) Up Thruster Right: %+.2f", pkt.tup_right);
+            ImGui::Text("(L2/R2)  Claw:              %+.2f", pkt.claw);
+            ImGui::Text("(Up/Down Dpad) Rotate:      %+.2f", pkt.rotate);
             ImGui::End();
         }
+
+        // {
+        //     ImGui::Begin("Sensor Stats");
+        //     ImGui::Text("Gyro (pitch, yaw, roll): %+.2f, %+.2f, %+.2f", ctrl.GyroPitch(), ctrl.GyroYaw(), ctrl.GyroRoll());
+        //     ImGui::Text("Accel (x, y, z): %+.2f, %+.2f, %+.2f", ctrl.AccelX(), ctrl.AccelY(), ctrl.AccelZ());
+        //     ImGui::End();
+        // }
 
         auto now = std::chrono::steady_clock::now();
         if (!serial || !serial->is_open()) {
@@ -269,13 +315,16 @@ int main() {
             }
         }
 
-        // --- Thrusters ---
-        float tleft = 0.0f, tright = 0.0f;
+        float tleft = 0.0f;
+        float tright = 0.0f;
+
         for (auto& c : controllers) {
             float x = c->LeftX();
             float y = -c->LeftY();
-            tleft  += y + x;
-            tright += y - x;
+            float raw_left = y + x;
+            float raw_right = y - x;
+            tleft  += raw_left;
+            tright += raw_right;
         }
 
         float z = 0.0f;
@@ -284,35 +333,65 @@ int main() {
         }
         pkt.tup_left = pkt.tup_right = std::clamp(z, -1.0f, 1.0f);
 
-        // --- Elbow servo: L2/R2 triggers, accumulated ---
+        float clawDelta = 0.0f;
+        for (auto& c : controllers) {
+            clawDelta += std::pow(c->R2(), 1.2f) * 0.005f; // Open
+            clawDelta -= std::pow(c->L2(), 1.2f) * 0.005f; // Close
+        }
+        pkt.claw = std::clamp(pkt.claw + clawDelta, 0.0f, 1.0f);
+
+        // --- Persistent state for rotate control ---
+        static std::vector<int> rotateHeldFrames(controllers.size(), 0);
+        static std::vector<bool> rotateLastFrameUp(controllers.size(), false);
+        static std::vector<bool> rotateLastFrameDown(controllers.size(), false);
+
+        // --- Update size if controllers are hotplugged ---
+        if (rotateHeldFrames.size() != controllers.size()) {
+            rotateHeldFrames.resize(controllers.size(), 0);
+            rotateLastFrameUp.resize(controllers.size(), false);
+            rotateLastFrameDown.resize(controllers.size(), false);
+        }
+
         float rotateDelta = 0.0f;
-        for (auto& c : controllers) {
-            rotateDelta += std::pow(c->R2(), 1.2f) * 0.005f;  // Extend
-            rotateDelta -= std::pow(c->L2(), 1.2f) * 0.005f;  // Retract
+
+        for (size_t i = 0; i < controllers.size(); ++i) {
+            bool up = controllers[i]->DpadUp();
+            bool down = controllers[i]->DpadDown();
+
+            bool freshUp = up && !rotateLastFrameUp[i];
+            bool freshDown = down && !rotateLastFrameDown[i];
+
+            if (up || down) {
+                rotateHeldFrames[i] = (rotateLastFrameUp[i] == up && rotateLastFrameDown[i] == down)
+                                      ? rotateHeldFrames[i] + 1
+                                      : 1;
+            } else {
+                rotateHeldFrames[i] = 0;
+            }
+
+            rotateLastFrameUp[i] = up;
+            rotateLastFrameDown[i] = down;
+
+            float delta = 0.0f;
+
+            if (freshUp) {
+                delta = 0.01f;
+            } else if (freshDown) {
+                delta = -0.01f;
+            } else if (rotateHeldFrames[i] > 10) {
+                float heldSpeed = std::min(0.01f, float(rotateHeldFrames[i] - 10) * 0.0001f);
+                delta = (up ? +heldSpeed : 0.0f) - (down ? +heldSpeed : 0.0f);
+            }
+
+            rotateDelta += delta;
         }
 
-
-        // --- DC Motor 1 (rotation): X and B, direct ---
-        float dcMotor = 0.0f;
-        for (auto& c : controllers) {
-            if (c->Circle()) dcMotor =  1.0f;
-            if (c->Square())  dcMotor = -1.0f;
-        }
-
-        // --- DC Motor 2 (linear movement): Y and A, direct ---
-        float dcMotor2 = 0.0f;
-        for (auto& c : controllers) {
-            if (c->Triangle())   dcMotor2 =  1.0f;
-            if (c->Cross()) dcMotor2 = -1.0f;
-        }
-
-        pkt.tleft     = -calib.apply("TLeft",      tleft);
-        pkt.tright    = -calib.apply("TRight",     tright);
-        pkt.tup_left  =  calib.apply("TUp Left",   z);
-        pkt.tup_right =  calib.apply("TUp Right",  z);
-        pkt.rotate    =  calib.apply("Rotate",     pkt.rotate + rotateDelta);
-        pkt.dc_motor  =  calib.apply("DC Motor",   dcMotor);
-        pkt.dc_motor2 =  calib.apply("DC Motor 2", dcMotor2);
+        pkt.tleft       = -calib.apply("TLeft", tleft);
+        pkt.tright      = -calib.apply("TRight", tright);
+        pkt.tup_left    = calib.apply("TUp Left", z);
+        pkt.tup_right   = calib.apply("TUp Right", z);
+        pkt.claw        = calib.apply("Claw", pkt.claw);
+        pkt.rotate      = calib.apply("Rotate", pkt.rotate + rotateDelta);
 
         if (std::memcmp(&pkt, &lastSentPacket, sizeof(ROVPacket)) != 0) {
             try {
@@ -357,8 +436,13 @@ int main() {
                 bool freshL1 = currL1 && !lastL1State[i];
                 bool freshR1 = currR1 && !lastR1State[i];
 
-                if (freshL1) obs.switchToPreviousScene();
-                if (freshR1) obs.switchToNextScene();
+                if (freshL1) {
+                    obs.switchToPreviousScene();
+                }
+
+                if (freshR1) {
+                    obs.switchToNextScene();
+                }
 
                 lastL1State[i] = currL1;
                 lastR1State[i] = currR1;
@@ -366,10 +450,13 @@ int main() {
         }
 
         ImGui::Begin("Telemetry");
+        // ImGui::Text("Depth: %.2f m", incoming.depth);
+        // ImGui::Text("Pressure: %.2f kPa", incoming.pressure);
         ImGui::Text("Temp: %.2f °C", incoming.temperature);
         ImGui::Text("Humidity: %.2f %%", incoming.humidity);
         ImGui::End();
-
+        
+        
         ImGui::Render();
         SDL_SetRenderDrawColor(renderer, 15, 15, 15, 255);
         SDL_RenderClear(renderer);

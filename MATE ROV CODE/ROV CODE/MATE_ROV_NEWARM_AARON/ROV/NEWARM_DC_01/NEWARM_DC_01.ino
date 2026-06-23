@@ -231,7 +231,7 @@ void loop() {
   static uint8_t buffer[sizeof(ROVPacket)];
   static size_t index = 0;
   static unsigned long lastTelemetryTime = 0;
-  const unsigned long telemetryInterval = 100;
+  const unsigned long telemetryInterval = 5;
 
   if (millis() - lastTelemetryTime >= telemetryInterval) {
     sendTelemetry();
