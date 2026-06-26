@@ -47,9 +47,9 @@ struct TelemetryPacket {
 
   float pitch_deg;
   float roll_deg;
-  float yaw_deg;
+  //float yaw_deg;
 
-  float distance_cm;   // underwater distance sensor
+  //float distance_cm;   // underwater distance sensor
 
   float temp;
 
@@ -135,7 +135,7 @@ void applyControls(const ROVPacket& p) {
   //motor 2
   driveMotor(M2_IN1, M2_IN2, M2_EN, p.dc_motor2);
 }
-
+'''
 float yaw_deg = 0.0f;
 unsigned long lastYawTime = 0;
 
@@ -174,7 +174,7 @@ float readDistanceCM() {
 
   return distanceCM;
 }
-''
+'''
 void sendTelemetry() {
   float dhtTemperature = dht.readTemperature();
   if (isnan(dhtTemperature)) dhtTemperature = -99.0f;
@@ -182,13 +182,13 @@ void sendTelemetry() {
   float humidity = dht.readHumidity();
   if (isnan(humidity)) humidity = -99.0f;
 
-  t.distance_cm = distanceCM; 
+  //t.distance_cm = distanceCM; 
   sensors_event_t accelEvent;
   sensors_event_t gyroEvent;
   sensors_event_t mpuTempEvent;
 
   mpu.getEvent(&accelEvent, &gyroEvent, &mpuTempEvent);
-
+'''
   unsigned long now = millis();
   float dt = (now - lastYawTime) / 1000.0f;
   lastYawTime = now;
@@ -197,7 +197,7 @@ void sendTelemetry() {
 
   if (yaw_deg >= 360.0f) yaw_deg -= 360.0f;
   if (yaw_deg < 0.0f) yaw_deg += 360.0f;
-
+'''
   const float G = 9.80665f;
 
   float accelX = accelEvent.acceleration.x / G;
