@@ -335,9 +335,15 @@ int main() {
         }
 
         float z = 0.0f;
+        float crab = 0.0f;
+
         for (auto& c : controllers) {
-            z += c->RightY();
+            z    += c->RightY();
+            crab += c->RightX();
         }
+
+        float upLeft  = std::clamp(z + crab, -1.0f, 1.0f);
+        float upRight = std::clamp(z - crab, -1.0f, 1.0f);
         pkt.tup_left = pkt.tup_right = std::clamp(z, -1.0f, 1.0f);
 
         tleft  = ApplyExpo(std::clamp(tleft,  -1.0f, 1.0f), 0.7f);
